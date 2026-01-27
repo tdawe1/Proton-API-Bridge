@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henrybear327/Proton-API-Bridge/common"
-	"github.com/henrybear327/Proton-API-Bridge/utility"
-	"github.com/ProtonMail/go-proton-api"
+	"github.com/rclone/Proton-API-Bridge/common"
+	"github.com/rclone/Proton-API-Bridge/utility"
+	"github.com/rclone/go-proton-api"
 
 	mathrand "math/rand"
 )

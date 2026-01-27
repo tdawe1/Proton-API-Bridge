@@ -3,7 +3,7 @@ package proton_api_bridge
 import (
 	"context"
 
-	"github.com/ProtonMail/go-proton-api"
+	"github.com/rclone/go-proton-api"
 )
 
 /*

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ProtonMail/gopenpgp/v2/crypto"
-	"github.com/ProtonMail/go-proton-api"
+	"github.com/rclone/go-proton-api"
 )
 
 func (protonDrive *ProtonDrive) searchByNameRecursivelyFromRoot(ctx context.Context, targetName string, isFolder bool, listAllActiveOrDraftFiles bool) (*proton.Link, error) {

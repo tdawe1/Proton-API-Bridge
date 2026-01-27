@@ -10,7 +10,7 @@ Currently, only Proton Drive APIs are bridged, as we are aiming to implement a b
 
 ## Sidenotes
 
-We are using a fork of the [proton-go-api](https://github.com/henrybear327/go-proton-api), as we are adding quite some new code to it. We are actively rebasing on top of the master branch of the upstream, as we will try to commit back to the upstream once we feel like the code changes are stable.
+We are using a fork of the [proton-go-api](https://github.com/rclone/go-proton-api), as we are adding quite some new code to it. We are actively rebasing on top of the master branch of the upstream, as we will try to commit back to the upstream once we feel like the code changes are stable.
 
 # Unit testing and linting 
 
@@ -23,7 +23,7 @@ We are using a fork of the [proton-go-api](https://github.com/henrybear327/go-pr
 > Thanks to Anson Chen for the motivation and some initial help on various matters!
 
 Currently, the development are split into 2 versions. 
-V1 supports the features [required by rclone](https://github.com/henrybear327/rclone/blob/master/fs/types.go), such as `file listing`. As the unit and integration tests from rclone have all been passed, we would stabilize this and then move onto developing V2.
+V1 supports the features [required by rclone](https://github.com/rclone/rclone/blob/master/fs/types.go), such as `file listing`. As the unit and integration tests from rclone have all been passed, we would stabilize this and then move onto developing V2.
 V2 will bring in optimizations and enhancements, esp. supporting thumbnails. Please see the list below.
 
 ## V1
@@ -91,7 +91,7 @@ V2 will bring in optimizations and enhancements, esp. supporting thumbnails. Ple
 - [x] Update RClone's contribution.md file
 - [x] Remove delete all's hardcoded string
 - [x] Point to the right proton-go-api branch
-    - [x] Run `go get github.com/henrybear327/go-proton-api@dev` to update go mod
+    - [x] Run `go get github.com/rclone/go-proton-api@dev` to update go mod
 - [x] Pass in AppVersion as a config option
 - [x] Proper error handling by looking at the return code instead of the error string
     - [x] Duplicated folder name handling: 422: A file or folder with that name already exists (Code=2500, Status=422)

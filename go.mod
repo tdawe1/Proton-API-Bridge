@@ -1,4 +1,4 @@
-module github.com/henrybear327/Proton-API-Bridge
+module github.com/rclone/Proton-API-Bridge
 
 go 1.22.0
 
@@ -6,8 +6,8 @@ toolchain go1.23.5
 
 require (
 	github.com/ProtonMail/gluon v0.17.1-0.20230724134000-308be39be96e
-	github.com/ProtonMail/go-proton-api v0.4.1-0.20250121114701-67bd01ad0bc3
 	github.com/ProtonMail/gopenpgp/v2 v2.8.2
+	github.com/rclone/go-proton-api v1.0.1-0.20260127173028-eb465cac3b18
 	github.com/relvacode/iso8601 v1.6.0
 	golang.org/x/sync v0.10.0
 )
@@ -26,15 +26,11 @@ require (
 	github.com/emersion/go-vcard v0.0.0-20241024213814-c9703dde27ff // indirect
 	github.com/go-resty/resty/v2 v2.16.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/henrybear327/go-proton-api v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
-	gitlab.com/c0b/go-ordered-json v0.0.0-20201030195603-febf46534d5a // indirect
 	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 	golang.org/x/net v0.34.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 )
-
-replace github.com/ProtonMail/go-proton-api => github.com/henrybear327/go-proton-api v0.0.0-20250127204557-9ee38cb0a689

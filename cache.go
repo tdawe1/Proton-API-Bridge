@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/ProtonMail/gopenpgp/v2/crypto"
-	"github.com/ProtonMail/go-proton-api"
+	"github.com/rclone/go-proton-api"
 )
 
 type cacheEntry struct {

@@ -3,7 +3,7 @@ package proton_api_bridge
 import (
 	"context"
 
-	"github.com/ProtonMail/go-proton-api"
+	"github.com/rclone/go-proton-api"
 )
 
 func getAllShares(ctx context.Context, c *proton.Client) ([]proton.ShareMetadata, error) {

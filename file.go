@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ProtonMail/go-proton-api"
+	"github.com/rclone/go-proton-api"
 	"github.com/relvacode/iso8601"
 )
 
@@ -77,7 +77,7 @@ func (protonDrive *ProtonDrive) GetActiveRevisionAttrs(ctx context.Context, link
 
 	var sha1Hash string
 	if val, ok := revisionXAttrCommon.Digests["SHA1"]; ok {
-		sha1Hash = strings.ToLower(val) // https://github.com/henrybear327/Proton-API-Bridge/issues/21 and https://github.com/rclone/rclone/issues/7345#issuecomment-1821463100
+		sha1Hash = strings.ToLower(val) // https://github.com/rclone/Proton-API-Bridge/issues/21 and https://github.com/rclone/rclone/issues/7345#issuecomment-1821463100
 	} else {
 		sha1Hash = ""
 	}

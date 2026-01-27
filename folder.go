@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ProtonMail/go-proton-api"
+	"github.com/rclone/go-proton-api"
 )
 
 type ProtonDirectoryData struct {
