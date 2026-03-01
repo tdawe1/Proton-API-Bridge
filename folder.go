@@ -202,9 +202,12 @@ func (protonDrive *ProtonDrive) MoveFolder(ctx context.Context, srcLink *proton.
 func (protonDrive *ProtonDrive) moveLink(ctx context.Context, srcLink *proton.Link, dstParentLink *proton.Link, dstName string) error {
 	// we are moving the srcLink to under dstParentLink, with name dstName
 	req := proton.MoveLinkReq{
-		ParentLinkID:     dstParentLink.LinkID,
-		OriginalHash:     srcLink.Hash,
-		SignatureAddress: protonDrive.signatureAddress,
+		ParentLinkID:       dstParentLink.LinkID,
+		OriginalHash:       srcLink.Hash,
+		NameSignatureEmail: srcLink.NameSignatureEmail,
+	}
+	if req.NameSignatureEmail == "" {
+		req.NameSignatureEmail = protonDrive.signatureAddress
 	}
 
 	dstParentKR, err := protonDrive.getLinkKR(ctx, dstParentLink)
@@ -239,14 +242,14 @@ func (protonDrive *ProtonDrive) moveLink(ctx context.Context, srcLink *proton.Li
 		return err
 	}
 	req.NodePassphrase = nodePassphrase
-	req.NodePassphraseSignature = srcLink.NodePassphraseSignature
+	req.ContentHash = nil
 
 	protonDrive.removeLinkIDFromCache(srcLink.LinkID, false)
 
 	// TODO: disable cache when move is in action?
 	// because there might be the case where others read for the same link currently being move -> race condition
 	// argument: cache itself is already outdated in a sense, as we don't even have event system (even if we have, it's still outdated...)
-	err = protonDrive.c.MoveLink(ctx, protonDrive.MainShare.ShareID, srcLink.LinkID, req)
+	err = protonDrive.c.MoveLinkByVolume(ctx, protonDrive.MainShare.VolumeID, srcLink.LinkID, req)
 	if err != nil {
 		return err
 	}

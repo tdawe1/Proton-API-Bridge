@@ -55,7 +55,7 @@ func Login(ctx context.Context, config *Config, authHandler proton.AuthHandler, 
 	var addrs map[string]proton.Address
 
 	// get manager
-	m := getProtonManager(config.AppVersion, config.UserAgent)
+	m := getProtonManager(config.AppVersion, config.DriveSDKVersion, config.UserAgent)
 
 	if config.UseReusableLogin {
 		c = m.NewClient(config.ReusableCredential.UID, config.ReusableCredential.AccessToken, config.ReusableCredential.RefreshToken)

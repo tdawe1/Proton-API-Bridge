@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"io"
 	"mime"
 	"os"
@@ -18,13 +19,48 @@ import (
 	"github.com/rclone/go-proton-api"
 )
 
+func buildVerificationToken(verificationCode, encData []byte) []byte {
+	verificationToken := make([]byte, len(verificationCode))
+	for idx := range verificationCode {
+		if idx < len(encData) {
+			verificationToken[idx] = verificationCode[idx] ^ encData[idx]
+		} else {
+			verificationToken[idx] = verificationCode[idx]
+		}
+	}
+
+	return verificationToken
+}
+
+func recoverBrokenConflictState(err error, deleteStaleLink func() error) (bool, error) {
+	apiErr := new(proton.APIError)
+	if !errors.As(err, &apiErr) || apiErr.Code != 2501 {
+		return false, err
+	}
+
+	if deleteErr := deleteStaleLink(); deleteErr != nil {
+		return false, deleteErr
+	}
+
+	return true, nil
+}
+
 func (protonDrive *ProtonDrive) handleRevisionConflict(ctx context.Context, link *proton.Link, createFileResp *proton.CreateFileRes) (string, bool, error) {
 	if link != nil {
 		linkID := link.LinkID
 
 		draftRevision, err := protonDrive.GetRevisions(ctx, link, proton.RevisionStateDraft)
 		if err != nil {
-			return "", false, err
+			shouldRecreateDraft, recoveredErr := recoverBrokenConflictState(err, func() error {
+				return protonDrive.c.DeleteChildren(ctx, protonDrive.MainShare.ShareID, link.ParentLinkID, linkID)
+			})
+			if shouldRecreateDraft {
+				// Link is in a broken conflict state (name reserved but no readable revisions).
+				// Delete the stale link and recreate draft from scratch.
+				return "", true, nil
+			}
+
+			return "", false, recoveredErr
 		}
 
 		// if we have a draft revision, depending on the user config, we can abort the upload or recreate a draft
@@ -252,6 +288,15 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 
 	totalFileSize := int64(0)
 
+	verificationRes, err := protonDrive.c.GetRevisionVerification(ctx, protonDrive.MainShare.ShareID, linkID, revisionID)
+	if err != nil {
+		return nil, 0, nil, "", err
+	}
+	verificationCode, err := base64.StdEncoding.DecodeString(verificationRes.VerificationCode)
+	if err != nil {
+		return nil, 0, nil, "", err
+	}
+
 	pendingUploadBlocks := make([]PendingUploadBlocks, 0)
 	manifestSignatureData := make([]byte, 0)
 	uploadPendingBlocks := func() error {
@@ -266,6 +311,7 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 		blockUploadReq := proton.BlockUploadReq{
 			AddressID:  protonDrive.MainShare.AddressID,
 			ShareID:    protonDrive.MainShare.ShareID,
+			VolumeID:   protonDrive.MainShare.VolumeID,
 			LinkID:     linkID,
 			RevisionID: revisionID,
 
@@ -281,12 +327,28 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 			// log.Println("Before semaphore")
 			if err := protonDrive.blockUploadSemaphore.Acquire(ctx, 1); err != nil {
 				errChan <- err
+				return
 			}
 			defer protonDrive.blockUploadSemaphore.Release(1)
 			// log.Println("After semaphore")
 			// defer log.Println("Release semaphore")
 
-			errChan <- protonDrive.c.UploadBlock(ctx, bareURL, token, block)
+			var uploadErr error
+			for attempt := 1; attempt <= 3; attempt++ {
+				uploadErr = protonDrive.c.UploadBlock(ctx, bareURL, token, block)
+				if uploadErr == nil {
+					errChan <- nil
+					return
+				}
+				if seeker, ok := block.(io.Seeker); ok {
+					_, _ = seeker.Seek(0, io.SeekStart)
+				}
+				if attempt < 3 {
+					time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+				}
+			}
+
+			errChan <- uploadErr
 		}
 		for i := range blockUploadResp {
 			go uploadBlockWrapper(ctx, errChan, blockUploadResp[i].BareURL, blockUploadResp[i].Token, bytes.NewReader(pendingUploadBlocks[i].encData))
@@ -365,9 +427,12 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 		}
 		manifestSignatureData = append(manifestSignatureData, hash...)
 
+		verificationToken := buildVerificationToken(verificationCode, encData)
+
 		pendingUploadBlocks = append(pendingUploadBlocks, PendingUploadBlocks{
 			blockUploadInfo: proton.BlockUploadInfo{
 				Index:        i, // iOS drive: BE starts with 1
+				Verifier:     &proton.Verifier{Token: base64.StdEncoding.EncodeToString(verificationToken)},
 				Size:         int64(len(encData)),
 				EncSignature: encSignatureStr,
 				Hash:         base64Hash,
@@ -375,7 +440,7 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 			encData: encData,
 		})
 	}
-	err := uploadPendingBlocks()
+	err = uploadPendingBlocks()
 	if err != nil {
 		return nil, 0, nil, "", err
 	}

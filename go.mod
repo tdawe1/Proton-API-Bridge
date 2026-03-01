@@ -12,6 +12,8 @@ require (
 	golang.org/x/sync v0.10.0
 )
 
+replace github.com/rclone/go-proton-api => /home/thomas/Workspace/go-proton-api-patch
+
 require (
 	github.com/ProtonMail/bcrypt v0.0.0-20211005172633-e235017c1baf // indirect
 	github.com/ProtonMail/go-crypto v1.1.5 // indirect
