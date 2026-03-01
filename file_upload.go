@@ -13,6 +13,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"github.com/ProtonMail/gopenpgp/v2/crypto"
@@ -32,9 +33,124 @@ func buildVerificationToken(verificationCode, encData []byte) []byte {
 	return verificationToken
 }
 
-func recoverBrokenConflictState(err error, deleteStaleLink func() error) (bool, error) {
+type revisionVerificationResult struct {
+	VerificationCode string
+	ContentKeyPacket string
+}
+
+func setStringFieldIfPresent(target any, fieldName, value string) {
+	v := reflect.ValueOf(target)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return
+	}
+	v = v.Elem()
+	if v.Kind() != reflect.Struct {
+		return
+	}
+
+	field := v.FieldByName(fieldName)
+	if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.String {
+		return
+	}
+
+	field.SetString(value)
+}
+
+func setVerifierTokenIfPresent(info *proton.BlockUploadInfo, token string) {
+	v := reflect.ValueOf(info)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return
+	}
+	v = v.Elem()
+	field := v.FieldByName("Verifier")
+	if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Pointer {
+		return
+	}
+	if field.Type().Elem().Kind() != reflect.Struct {
+		return
+	}
+
+	verifier := reflect.New(field.Type().Elem())
+	tokenField := verifier.Elem().FieldByName("Token")
+	if !tokenField.IsValid() || !tokenField.CanSet() || tokenField.Kind() != reflect.String {
+		return
+	}
+
+	tokenField.SetString(token)
+	field.Set(verifier)
+}
+
+func collectUploadErrors(errChan <-chan error, count int, cancelUploads context.CancelFunc) error {
+	var firstErr error
+	for i := 0; i < count; i++ {
+		err := <-errChan
+		if err != nil && firstErr == nil {
+			firstErr = err
+			cancelUploads()
+		}
+	}
+
+	return firstErr
+}
+
+func getRevisionVerificationCompat(ctx context.Context, client any, shareID, volumeID, linkID, revisionID string) (revisionVerificationResult, error) {
+	tryCall := func(methodName string, args ...any) (revisionVerificationResult, bool, error) {
+		resultValues, called, err := findAndCallMethod(client, methodName, args...)
+		if !called || err != nil {
+			return revisionVerificationResult{}, called, err
+		}
+
+		if len(resultValues) != 2 {
+			return revisionVerificationResult{}, true, ErrInternalErrorOnFileUpload
+		}
+
+		callErr, err := extractErrorResult(resultValues[1])
+		if err != nil {
+			return revisionVerificationResult{}, true, err
+		}
+		if callErr != nil {
+			return revisionVerificationResult{}, true, callErr
+		}
+
+		result := resultValues[0]
+		if result.Kind() == reflect.Pointer {
+			if result.IsNil() {
+				return revisionVerificationResult{}, true, ErrInternalErrorOnFileUpload
+			}
+			result = result.Elem()
+		}
+		if result.Kind() != reflect.Struct {
+			return revisionVerificationResult{}, true, ErrInternalErrorOnFileUpload
+		}
+
+		verificationCode := result.FieldByName("VerificationCode")
+		contentKeyPacket := result.FieldByName("ContentKeyPacket")
+		if !verificationCode.IsValid() || !contentKeyPacket.IsValid() || verificationCode.Kind() != reflect.String || contentKeyPacket.Kind() != reflect.String {
+			return revisionVerificationResult{}, true, ErrInternalErrorOnFileUpload
+		}
+
+		return revisionVerificationResult{
+			VerificationCode: verificationCode.String(),
+			ContentKeyPacket: contentKeyPacket.String(),
+		}, true, nil
+	}
+
+	byVolumeRes, called, err := tryCall("GetRevisionVerificationByVolume", ctx, volumeID, linkID, revisionID)
+	if called {
+		return byVolumeRes, err
+	}
+
+	byShareRes, called, err := tryCall("GetRevisionVerification", ctx, shareID, linkID, revisionID)
+	if called {
+		return byShareRes, err
+	}
+
+	return revisionVerificationResult{}, ErrInternalErrorOnFileUpload
+}
+
+func recoverBrokenConflictState(err error, linkState proton.LinkState, deleteStaleLink func() error) (bool, error) {
 	apiErr := new(proton.APIError)
-	if !errors.As(err, &apiErr) || apiErr.Code != 2501 {
+	if !errors.As(err, &apiErr) || apiErr.Code != 2501 || linkState != proton.LinkStateDraft {
 		return false, err
 	}
 
@@ -51,7 +167,7 @@ func (protonDrive *ProtonDrive) handleRevisionConflict(ctx context.Context, link
 
 		draftRevision, err := protonDrive.GetRevisions(ctx, link, proton.RevisionStateDraft)
 		if err != nil {
-			shouldRecreateDraft, recoveredErr := recoverBrokenConflictState(err, func() error {
+			shouldRecreateDraft, recoveredErr := recoverBrokenConflictState(err, link.State, func() error {
 				return protonDrive.c.DeleteChildren(ctx, protonDrive.MainShare.ShareID, link.ParentLinkID, linkID)
 			})
 			if shouldRecreateDraft {
@@ -288,7 +404,7 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 
 	totalFileSize := int64(0)
 
-	verificationRes, err := protonDrive.c.GetRevisionVerification(ctx, protonDrive.MainShare.ShareID, linkID, revisionID)
+	verificationRes, err := getRevisionVerificationCompat(ctx, protonDrive.c, protonDrive.MainShare.ShareID, protonDrive.MainShare.VolumeID, linkID, revisionID)
 	if err != nil {
 		return nil, 0, nil, "", err
 	}
@@ -311,18 +427,21 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 		blockUploadReq := proton.BlockUploadReq{
 			AddressID:  protonDrive.MainShare.AddressID,
 			ShareID:    protonDrive.MainShare.ShareID,
-			VolumeID:   protonDrive.MainShare.VolumeID,
 			LinkID:     linkID,
 			RevisionID: revisionID,
 
 			BlockList: blockList,
 		}
+		setStringFieldIfPresent(&blockUploadReq, "VolumeID", protonDrive.MainShare.VolumeID)
 		blockUploadResp, err := protonDrive.c.RequestBlockUpload(ctx, blockUploadReq)
 		if err != nil {
 			return err
 		}
 
-		errChan := make(chan error)
+		uploadCtx, cancelUploads := context.WithCancel(ctx)
+		defer cancelUploads()
+
+		errChan := make(chan error, len(blockUploadResp))
 		uploadBlockWrapper := func(ctx context.Context, errChan chan error, bareURL, token string, block io.Reader) {
 			// log.Println("Before semaphore")
 			if err := protonDrive.blockUploadSemaphore.Acquire(ctx, 1); err != nil {
@@ -344,21 +463,25 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 					_, _ = seeker.Seek(0, io.SeekStart)
 				}
 				if attempt < 3 {
-					time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+					retryTimer := time.NewTimer(time.Duration(attempt) * 500 * time.Millisecond)
+					select {
+					case <-ctx.Done():
+						retryTimer.Stop()
+						errChan <- ctx.Err()
+						return
+					case <-retryTimer.C:
+					}
 				}
 			}
 
 			errChan <- uploadErr
 		}
 		for i := range blockUploadResp {
-			go uploadBlockWrapper(ctx, errChan, blockUploadResp[i].BareURL, blockUploadResp[i].Token, bytes.NewReader(pendingUploadBlocks[i].encData))
+			go uploadBlockWrapper(uploadCtx, errChan, blockUploadResp[i].BareURL, blockUploadResp[i].Token, bytes.NewReader(pendingUploadBlocks[i].encData))
 		}
 
-		for i := 0; i < len(blockUploadResp); i++ {
-			err := <-errChan
-			if err != nil {
-				return err
-			}
+		if err := collectUploadErrors(errChan, len(blockUploadResp), cancelUploads); err != nil {
+			return err
 		}
 
 		pendingUploadBlocks = pendingUploadBlocks[:0]
@@ -429,15 +552,17 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 
 		verificationToken := buildVerificationToken(verificationCode, encData)
 
+		blockUploadInfo := proton.BlockUploadInfo{
+			Index:        i, // iOS drive: BE starts with 1
+			Size:         int64(len(encData)),
+			EncSignature: encSignatureStr,
+			Hash:         base64Hash,
+		}
+		setVerifierTokenIfPresent(&blockUploadInfo, base64.StdEncoding.EncodeToString(verificationToken))
+
 		pendingUploadBlocks = append(pendingUploadBlocks, PendingUploadBlocks{
-			blockUploadInfo: proton.BlockUploadInfo{
-				Index:        i, // iOS drive: BE starts with 1
-				Verifier:     &proton.Verifier{Token: base64.StdEncoding.EncodeToString(verificationToken)},
-				Size:         int64(len(encData)),
-				EncSignature: encSignatureStr,
-				Hash:         base64Hash,
-			},
-			encData: encData,
+			blockUploadInfo: blockUploadInfo,
+			encData:         encData,
 		})
 	}
 	err = uploadPendingBlocks()
