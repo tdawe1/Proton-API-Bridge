@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"os"
@@ -101,6 +102,14 @@ func collectUploadErrors(errChan <-chan error, count int, cancelUploads context.
 	}
 
 	return firstErr
+}
+
+func validateUploadBatchCardinality(uploadRespCount, pendingCount int) error {
+	if uploadRespCount != pendingCount {
+		return fmt.Errorf("request block upload returned %d links for %d pending blocks", uploadRespCount, pendingCount)
+	}
+
+	return nil
 }
 
 func getRevisionVerificationCompat(ctx context.Context, client any, shareID, volumeID, linkID, revisionID string) (revisionVerificationResult, error) {
@@ -446,6 +455,9 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 		setStringFieldIfPresent(&blockUploadReq, "VolumeID", protonDrive.MainShare.VolumeID)
 		blockUploadResp, err := protonDrive.c.RequestBlockUpload(ctx, blockUploadReq)
 		if err != nil {
+			return err
+		}
+		if err := validateUploadBatchCardinality(len(blockUploadResp), len(pendingUploadBlocks)); err != nil {
 			return err
 		}
 

@@ -276,3 +276,17 @@ func TestUploadBlockWithClientDelegatesSingleCall(t *testing.T) {
 		t.Fatalf("expected one upload call, got %d", client.calls)
 	}
 }
+
+func TestValidateUploadBatchCardinalityMatches(t *testing.T) {
+	err := validateUploadBatchCardinality(3, 3)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestValidateUploadBatchCardinalityMismatch(t *testing.T) {
+	err := validateUploadBatchCardinality(2, 3)
+	if err == nil {
+		t.Fatalf("expected mismatch error")
+	}
+}
