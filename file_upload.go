@@ -20,6 +20,8 @@ import (
 	"github.com/rclone/go-proton-api"
 )
 
+const fileOrFolderNotFoundCode proton.Code = 2501
+
 func buildVerificationToken(verificationCode, encData []byte) []byte {
 	verificationToken := make([]byte, len(verificationCode))
 	for idx := range verificationCode {
@@ -36,6 +38,14 @@ func buildVerificationToken(verificationCode, encData []byte) []byte {
 type revisionVerificationResult struct {
 	VerificationCode string
 	ContentKeyPacket string
+}
+
+type blockUploadClient interface {
+	UploadBlock(context.Context, string, string, io.Reader) error
+}
+
+func uploadBlockWithClient(ctx context.Context, client blockUploadClient, bareURL, token string, block io.Reader) error {
+	return client.UploadBlock(ctx, bareURL, token, block)
 }
 
 func setStringFieldIfPresent(target any, fieldName, value string) {
@@ -150,7 +160,7 @@ func getRevisionVerificationCompat(ctx context.Context, client any, shareID, vol
 
 func recoverBrokenConflictState(err error, linkState proton.LinkState, deleteStaleLink func() error) (bool, error) {
 	apiErr := new(proton.APIError)
-	if !errors.As(err, &apiErr) || apiErr.Code != 2501 || linkState != proton.LinkStateDraft {
+	if !errors.As(err, &apiErr) || apiErr.Code != fileOrFolderNotFoundCode || linkState != proton.LinkStateDraft {
 		return false, err
 	}
 
@@ -353,6 +363,7 @@ func (protonDrive *ProtonDrive) createFileUploadDraft(ctx context.Context, paren
 	if shouldSubmitCreateFileRequestAgain {
 		// the case where the link has only a draft but no active revision
 		// we need to delete the link and recreate one
+		// this path runs at most once to avoid unbounded create/retry loops
 		createFileResp, link, err = createFileAction()
 		if err != nil {
 			return "", "", nil, nil, err
@@ -452,29 +463,7 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 			// log.Println("After semaphore")
 			// defer log.Println("Release semaphore")
 
-			var uploadErr error
-			for attempt := 1; attempt <= 3; attempt++ {
-				uploadErr = protonDrive.c.UploadBlock(ctx, bareURL, token, block)
-				if uploadErr == nil {
-					errChan <- nil
-					return
-				}
-				if seeker, ok := block.(io.Seeker); ok {
-					_, _ = seeker.Seek(0, io.SeekStart)
-				}
-				if attempt < 3 {
-					retryTimer := time.NewTimer(time.Duration(attempt) * 500 * time.Millisecond)
-					select {
-					case <-ctx.Done():
-						retryTimer.Stop()
-						errChan <- ctx.Err()
-						return
-					case <-retryTimer.C:
-					}
-				}
-			}
-
-			errChan <- uploadErr
+			errChan <- uploadBlockWithClient(ctx, protonDrive.c, bareURL, token, block)
 		}
 		for i := range blockUploadResp {
 			go uploadBlockWrapper(uploadCtx, errChan, blockUploadResp[i].BareURL, blockUploadResp[i].Token, bytes.NewReader(pendingUploadBlocks[i].encData))

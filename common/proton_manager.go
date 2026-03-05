@@ -6,6 +6,9 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
+// Applies to all API calls made by the shared proton.Manager.
+const defaultAPIRequestRetryCount = 3
+
 type preRequestHookClient interface {
 	AddPreRequestHook(resty.RequestMiddleware)
 }
@@ -25,6 +28,7 @@ func getProtonManager(appVersion string, userAgent string) *proton.Manager {
 	/* Notes on API calls: if the app version is not specified, the api calls will be rejected. */
 	options := []proton.Option{
 		proton.WithAppVersion(appVersion),
+		proton.WithRetryCount(defaultAPIRequestRetryCount),
 		proton.WithUserAgent(userAgent),
 	}
 	m := proton.New(options...)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/rclone/go-proton-api"
@@ -45,6 +46,16 @@ func (c *revisionVerificationPanicClient) GetRevisionVerificationByVolume(contex
 	panic("boom")
 }
 
+type uploadBlockCountClient struct {
+	calls int
+	err   error
+}
+
+func (c *uploadBlockCountClient) UploadBlock(context.Context, string, string, io.Reader) error {
+	c.calls++
+	return c.err
+}
+
 func TestBuildVerificationTokenXorsWithEncryptedBlock(t *testing.T) {
 	verificationCode := []byte{0x10, 0x20, 0x30, 0x40}
 	encData := []byte{0x01, 0x02, 0x03, 0x04}
@@ -70,7 +81,7 @@ func TestBuildVerificationTokenKeepsTailWhenBlockShorter(t *testing.T) {
 }
 
 func TestRecoverBrokenConflictStateRecreatesWhenCode2501(t *testing.T) {
-	apiErr := &proton.APIError{Code: 2501, Status: 422, Message: "File or folder not found"}
+	apiErr := &proton.APIError{Code: fileOrFolderNotFoundCode, Status: 422, Message: "File or folder not found"}
 	err := fmt.Errorf("wrapped transport error: %w", apiErr)
 
 	deleteCalls := 0
@@ -91,7 +102,7 @@ func TestRecoverBrokenConflictStateRecreatesWhenCode2501(t *testing.T) {
 }
 
 func TestRecoverBrokenConflictStatePropagatesDeleteError(t *testing.T) {
-	apiErr := &proton.APIError{Code: 2501, Status: 422, Message: "File or folder not found"}
+	apiErr := &proton.APIError{Code: fileOrFolderNotFoundCode, Status: 422, Message: "File or folder not found"}
 	err := fmt.Errorf("wrapped transport error: %w", apiErr)
 	deleteErr := errors.New("delete failed")
 
@@ -128,7 +139,7 @@ func TestRecoverBrokenConflictStateReturnsOriginalErrorOnOtherCode(t *testing.T)
 }
 
 func TestRecoverBrokenConflictStateReturnsOriginalErrorForUnrelated2501(t *testing.T) {
-	originalErr := fmt.Errorf("wrapped transport error: %w", &proton.APIError{Code: 2501, Status: 422, Message: "name reserved"})
+	originalErr := fmt.Errorf("wrapped transport error: %w", &proton.APIError{Code: fileOrFolderNotFoundCode, Status: 422, Message: "name reserved"})
 
 	deleteCalls := 0
 	shouldRecreate, gotErr := recoverBrokenConflictState(originalErr, proton.LinkStateActive, func() error {
@@ -148,7 +159,7 @@ func TestRecoverBrokenConflictStateReturnsOriginalErrorForUnrelated2501(t *testi
 }
 
 func TestRecoverBrokenConflictStateRecreatesDraftWithoutMessageMatch(t *testing.T) {
-	apiErr := &proton.APIError{Code: 2501, Status: 422, Message: "draft conflict"}
+	apiErr := &proton.APIError{Code: fileOrFolderNotFoundCode, Status: 422, Message: "draft conflict"}
 	err := fmt.Errorf("wrapped transport error: %w", apiErr)
 
 	deleteCalls := 0
@@ -250,5 +261,18 @@ func TestCollectUploadErrorsNoErrorNoCancel(t *testing.T) {
 	}
 	if cancelCalls != 0 {
 		t.Fatalf("expected zero cancel calls, got %d", cancelCalls)
+	}
+}
+
+func TestUploadBlockWithClientDelegatesSingleCall(t *testing.T) {
+	wantErr := errors.New("permanent upload failure")
+	client := &uploadBlockCountClient{err: wantErr}
+
+	err := uploadBlockWithClient(context.Background(), client, "https://example.invalid/upload", "token", bytes.NewReader([]byte("payload")))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("expected one upload call, got %d", client.calls)
 	}
 }
