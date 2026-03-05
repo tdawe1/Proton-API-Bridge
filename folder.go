@@ -2,10 +2,63 @@ package proton_api_bridge
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"time"
 
 	"github.com/rclone/go-proton-api"
 )
+
+func setNilPointerFieldIfPresent(target any, fieldName string) {
+	v := reflect.ValueOf(target)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return
+	}
+	v = v.Elem()
+	if v.Kind() != reflect.Struct {
+		return
+	}
+
+	field := v.FieldByName(fieldName)
+	if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Pointer {
+		return
+	}
+
+	field.Set(reflect.Zero(field.Type()))
+}
+
+func moveLinkCompat(ctx context.Context, client any, shareID, volumeID, linkID string, req proton.MoveLinkReq) error {
+	tryCall := func(methodName string, args ...any) (bool, error) {
+		results, called, err := findAndCallMethod(client, methodName, args...)
+		if !called || err != nil {
+			return called, err
+		}
+
+		if len(results) != 1 {
+			return true, errors.New("incompatible move method signature")
+		}
+
+		resultErr, err := extractErrorResult(results[0])
+		if err != nil {
+			return true, err
+		}
+		if resultErr == nil {
+			return true, nil
+		}
+
+		return true, resultErr
+	}
+
+	if called, err := tryCall("MoveLinkByVolume", ctx, volumeID, linkID, req); called {
+		return err
+	}
+
+	if called, err := tryCall("MoveLink", ctx, shareID, linkID, req); called {
+		return err
+	}
+
+	return errors.New("no compatible move link method found")
+}
 
 type ProtonDirectoryData struct {
 	Link     *proton.Link
@@ -202,10 +255,14 @@ func (protonDrive *ProtonDrive) MoveFolder(ctx context.Context, srcLink *proton.
 func (protonDrive *ProtonDrive) moveLink(ctx context.Context, srcLink *proton.Link, dstParentLink *proton.Link, dstName string) error {
 	// we are moving the srcLink to under dstParentLink, with name dstName
 	req := proton.MoveLinkReq{
-		ParentLinkID:     dstParentLink.LinkID,
-		OriginalHash:     srcLink.Hash,
-		SignatureAddress: protonDrive.signatureAddress,
+		ParentLinkID: dstParentLink.LinkID,
+		OriginalHash: srcLink.Hash,
 	}
+	nameSignatureEmail := srcLink.NameSignatureEmail
+	if nameSignatureEmail == "" {
+		nameSignatureEmail = protonDrive.signatureAddress
+	}
+	setStringFieldIfPresent(&req, "NameSignatureEmail", nameSignatureEmail)
 
 	dstParentKR, err := protonDrive.getLinkKR(ctx, dstParentLink)
 	if err != nil {
@@ -239,14 +296,14 @@ func (protonDrive *ProtonDrive) moveLink(ctx context.Context, srcLink *proton.Li
 		return err
 	}
 	req.NodePassphrase = nodePassphrase
-	req.NodePassphraseSignature = srcLink.NodePassphraseSignature
+	setNilPointerFieldIfPresent(&req, "ContentHash")
 
 	protonDrive.removeLinkIDFromCache(srcLink.LinkID, false)
 
 	// TODO: disable cache when move is in action?
 	// because there might be the case where others read for the same link currently being move -> race condition
 	// argument: cache itself is already outdated in a sense, as we don't even have event system (even if we have, it's still outdated...)
-	err = protonDrive.c.MoveLink(ctx, protonDrive.MainShare.ShareID, srcLink.LinkID, req)
+	err = moveLinkCompat(ctx, protonDrive.c, protonDrive.MainShare.ShareID, protonDrive.MainShare.VolumeID, srcLink.LinkID, req)
 	if err != nil {
 		return err
 	}
