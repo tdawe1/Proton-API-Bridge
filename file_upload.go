@@ -60,6 +60,12 @@ func setStringFieldIfPresent(target any, fieldName, value string) {
 	}
 
 	field := v.FieldByName(fieldName)
+	if !field.IsValid() {
+		switch fieldName {
+		case "SignatureEmail", "NameSignatureEmail":
+			field = v.FieldByName("SignatureAddress")
+		}
+	}
 	if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.String {
 		return
 	}
@@ -164,7 +170,7 @@ func getRevisionVerificationCompat(ctx context.Context, client any, shareID, vol
 		return byShareRes, err
 	}
 
-	return revisionVerificationResult{}, ErrInternalErrorOnFileUpload
+	return revisionVerificationResult{}, nil
 }
 
 func recoverBrokenConflictState(err error, linkState proton.LinkState, deleteStaleLink func() error) (bool, error) {
@@ -551,15 +557,16 @@ func (protonDrive *ProtonDrive) uploadAndCollectBlockData(ctx context.Context, n
 		}
 		manifestSignatureData = append(manifestSignatureData, hash...)
 
-		verificationToken := buildVerificationToken(verificationCode, encData)
-
 		blockUploadInfo := proton.BlockUploadInfo{
 			Index:        i, // iOS drive: BE starts with 1
 			Size:         int64(len(encData)),
 			EncSignature: encSignatureStr,
 			Hash:         base64Hash,
 		}
-		setVerifierTokenIfPresent(&blockUploadInfo, base64.StdEncoding.EncodeToString(verificationToken))
+		if len(verificationCode) > 0 {
+			verificationToken := buildVerificationToken(verificationCode, encData)
+			setVerifierTokenIfPresent(&blockUploadInfo, base64.StdEncoding.EncodeToString(verificationToken))
+		}
 
 		pendingUploadBlocks = append(pendingUploadBlocks, PendingUploadBlocks{
 			blockUploadInfo: blockUploadInfo,

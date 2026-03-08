@@ -80,6 +80,57 @@ func TestSetNilPointerFieldIfPresent(t *testing.T) {
 	}
 }
 
+func TestSetMoveLinkSignatureAddressCompat(t *testing.T) {
+	req := proton.MoveLinkReq{}
+
+	setStringFieldIfPresent(&req, "SignatureEmail", "addr@example.com")
+	setStringFieldIfPresent(&req, "NameSignatureEmail", "addr@example.com")
+
+	if req.SignatureAddress != "addr@example.com" {
+		t.Fatalf("expected SignatureAddress to be set, got %q", req.SignatureAddress)
+	}
+}
+
+func TestApplyMoveRequestSignaturesForSignedNode(t *testing.T) {
+	req := struct {
+		proton.MoveLinkReq
+		NameSignatureEmail string
+		SignatureEmail     string
+	}{}
+
+	applyMoveRequestSignatures(&req, "addr@example.com", "sig", false)
+
+	if req.NameSignatureEmail != "addr@example.com" {
+		t.Fatalf("expected NameSignatureEmail to be set, got %q", req.NameSignatureEmail)
+	}
+	if req.SignatureEmail != "" {
+		t.Fatalf("expected SignatureEmail to be empty, got %q", req.SignatureEmail)
+	}
+	if req.NodePassphraseSignature != "" {
+		t.Fatalf("expected NodePassphraseSignature to be empty, got %q", req.NodePassphraseSignature)
+	}
+}
+
+func TestApplyMoveRequestSignaturesForAnonymousNode(t *testing.T) {
+	req := struct {
+		proton.MoveLinkReq
+		NameSignatureEmail string
+		SignatureEmail     string
+	}{}
+
+	applyMoveRequestSignatures(&req, "addr@example.com", "sig", true)
+
+	if req.NameSignatureEmail != "addr@example.com" {
+		t.Fatalf("expected NameSignatureEmail to be set, got %q", req.NameSignatureEmail)
+	}
+	if req.SignatureEmail != "addr@example.com" {
+		t.Fatalf("expected SignatureEmail to be set, got %q", req.SignatureEmail)
+	}
+	if req.NodePassphraseSignature != "sig" {
+		t.Fatalf("expected NodePassphraseSignature to be set, got %q", req.NodePassphraseSignature)
+	}
+}
+
 func TestMoveLinkCompatHandlesInvalidSignature(t *testing.T) {
 	err := moveLinkCompat(context.Background(), &moveLinkInvalidSignatureClient{}, "share", "volume", "link", proton.MoveLinkReq{})
 	if err == nil {

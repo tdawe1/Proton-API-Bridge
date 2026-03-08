@@ -60,6 +60,15 @@ func moveLinkCompat(ctx context.Context, client any, shareID, volumeID, linkID s
 	return errors.New("no compatible move link method found")
 }
 
+func applyMoveRequestSignatures(target any, signatureAddress, nodePassphraseSignature string, anonymousKey bool) {
+	setStringFieldIfPresent(target, "NameSignatureEmail", signatureAddress)
+	if !anonymousKey {
+		return
+	}
+	setStringFieldIfPresent(target, "SignatureEmail", signatureAddress)
+	setStringFieldIfPresent(target, "NodePassphraseSignature", nodePassphraseSignature)
+}
+
 type ProtonDirectoryData struct {
 	Link     *proton.Link
 	Name     string
@@ -258,11 +267,6 @@ func (protonDrive *ProtonDrive) moveLink(ctx context.Context, srcLink *proton.Li
 		ParentLinkID: dstParentLink.LinkID,
 		OriginalHash: srcLink.Hash,
 	}
-	nameSignatureEmail := srcLink.NameSignatureEmail
-	if nameSignatureEmail == "" {
-		nameSignatureEmail = protonDrive.signatureAddress
-	}
-	setStringFieldIfPresent(&req, "NameSignatureEmail", nameSignatureEmail)
 
 	dstParentKR, err := protonDrive.getLinkKR(ctx, dstParentLink)
 	if err != nil {
@@ -291,11 +295,12 @@ func (protonDrive *ProtonDrive) moveLink(ctx context.Context, srcLink *proton.Li
 	if err != nil {
 		return err
 	}
-	nodePassphrase, err := reencryptKeyPacket(srcParentKR, dstParentKR, protonDrive.DefaultAddrKR, srcLink.NodePassphrase)
+	nodePassphrase, nodePassphraseSignature, err := reencryptKeyPacket(srcParentKR, dstParentKR, protonDrive.DefaultAddrKR, srcLink.NodePassphrase)
 	if err != nil {
 		return err
 	}
 	req.NodePassphrase = nodePassphrase
+	applyMoveRequestSignatures(&req, protonDrive.signatureAddress, nodePassphraseSignature, srcLink.SignatureEmail == "")
 	setNilPointerFieldIfPresent(&req, "ContentHash")
 
 	protonDrive.removeLinkIDFromCache(srcLink.LinkID, false)

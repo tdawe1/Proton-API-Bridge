@@ -46,6 +46,8 @@ func (c *revisionVerificationPanicClient) GetRevisionVerificationByVolume(contex
 	panic("boom")
 }
 
+type revisionVerificationMissingClient struct{}
+
 type uploadBlockCountClient struct {
 	calls int
 	err   error
@@ -220,6 +222,16 @@ func TestGetRevisionVerificationCompatHandlesPanickingMethod(t *testing.T) {
 	_, err := getRevisionVerificationCompat(context.Background(), &revisionVerificationPanicClient{}, "share", "volume", "link", "revision")
 	if err == nil {
 		t.Fatalf("expected panic to be converted into error")
+	}
+}
+
+func TestGetRevisionVerificationCompatAllowsMissingMethods(t *testing.T) {
+	res, err := getRevisionVerificationCompat(context.Background(), &revisionVerificationMissingClient{}, "share", "volume", "link", "revision")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if res.VerificationCode != "" || res.ContentKeyPacket != "" {
+		t.Fatalf("expected empty compatibility result, got %#v", res)
 	}
 }
 
