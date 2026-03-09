@@ -35,12 +35,12 @@ func moveLinkCompat(ctx context.Context, client any, shareID, volumeID, linkID s
 		}
 
 		if len(results) != 1 {
-			return true, errors.New("incompatible move method signature")
+			return true, newMethodCompatibilityError("incompatible move method signature")
 		}
 
 		resultErr, err := extractErrorResult(results[0])
 		if err != nil {
-			return true, err
+			return true, newMethodCompatibilityError("incompatible move method signature: %w", err)
 		}
 		if resultErr == nil {
 			return true, nil
@@ -49,12 +49,32 @@ func moveLinkCompat(ctx context.Context, client any, shareID, volumeID, linkID s
 		return true, resultErr
 	}
 
+	var compatErr error
+
 	if called, err := tryCall("MoveLinkByVolume", ctx, volumeID, linkID, req); called {
-		return err
+		if err == nil {
+			return nil
+		}
+		if !isMethodCompatibilityError(err) {
+			return err
+		}
+		compatErr = err
 	}
 
 	if called, err := tryCall("MoveLink", ctx, shareID, linkID, req); called {
-		return err
+		if err == nil {
+			return nil
+		}
+		if !isMethodCompatibilityError(err) {
+			return err
+		}
+		if compatErr == nil {
+			compatErr = err
+		}
+	}
+
+	if compatErr != nil {
+		return compatErr
 	}
 
 	return errors.New("no compatible move link method found")

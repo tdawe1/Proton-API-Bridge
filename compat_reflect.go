@@ -1,9 +1,31 @@
 package proton_api_bridge
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 )
+
+type methodCompatibilityError struct {
+	err error
+}
+
+func (e *methodCompatibilityError) Error() string {
+	return e.err.Error()
+}
+
+func (e *methodCompatibilityError) Unwrap() error {
+	return e.err
+}
+
+func newMethodCompatibilityError(format string, args ...any) error {
+	return &methodCompatibilityError{err: fmt.Errorf(format, args...)}
+}
+
+func isMethodCompatibilityError(err error) bool {
+	var compatErr *methodCompatibilityError
+	return errors.As(err, &compatErr)
+}
 
 func findAndCallMethod(target any, methodName string, args ...any) (_ []reflect.Value, called bool, err error) {
 	defer func() {
@@ -29,7 +51,7 @@ func findAndCallMethod(target any, methodName string, args ...any) (_ []reflect.
 
 	methodType := method.Type()
 	if methodType.NumIn() != len(args) {
-		return nil, true, fmt.Errorf("%s has incompatible argument count", methodName)
+		return nil, true, newMethodCompatibilityError("%s has incompatible argument count", methodName)
 	}
 
 	callArgs := make([]reflect.Value, len(args))
@@ -37,7 +59,7 @@ func findAndCallMethod(target any, methodName string, args ...any) (_ []reflect.
 		paramType := methodType.In(i)
 		argValue, err := getCallableValue(paramType, args[i])
 		if err != nil {
-			return nil, true, fmt.Errorf("%s argument %d: %w", methodName, i, err)
+			return nil, true, newMethodCompatibilityError("%s argument %d: %w", methodName, i, err)
 		}
 		callArgs[i] = argValue
 	}

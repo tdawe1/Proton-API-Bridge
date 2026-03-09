@@ -126,12 +126,12 @@ func getRevisionVerificationCompat(ctx context.Context, client any, shareID, vol
 		}
 
 		if len(resultValues) != 2 {
-			return revisionVerificationResult{}, true, ErrInternalErrorOnFileUpload
+			return revisionVerificationResult{}, true, newMethodCompatibilityError("%s has incompatible result count", methodName)
 		}
 
 		callErr, err := extractErrorResult(resultValues[1])
 		if err != nil {
-			return revisionVerificationResult{}, true, err
+			return revisionVerificationResult{}, true, newMethodCompatibilityError("%s has incompatible error result: %w", methodName, err)
 		}
 		if callErr != nil {
 			return revisionVerificationResult{}, true, callErr
@@ -140,18 +140,18 @@ func getRevisionVerificationCompat(ctx context.Context, client any, shareID, vol
 		result := resultValues[0]
 		if result.Kind() == reflect.Pointer {
 			if result.IsNil() {
-				return revisionVerificationResult{}, true, ErrInternalErrorOnFileUpload
+				return revisionVerificationResult{}, true, newMethodCompatibilityError("%s returned nil result pointer", methodName)
 			}
 			result = result.Elem()
 		}
 		if result.Kind() != reflect.Struct {
-			return revisionVerificationResult{}, true, ErrInternalErrorOnFileUpload
+			return revisionVerificationResult{}, true, newMethodCompatibilityError("%s returned non-struct result", methodName)
 		}
 
 		verificationCode := result.FieldByName("VerificationCode")
 		contentKeyPacket := result.FieldByName("ContentKeyPacket")
 		if !verificationCode.IsValid() || !contentKeyPacket.IsValid() || verificationCode.Kind() != reflect.String || contentKeyPacket.Kind() != reflect.String {
-			return revisionVerificationResult{}, true, ErrInternalErrorOnFileUpload
+			return revisionVerificationResult{}, true, newMethodCompatibilityError("%s returned incompatible verification fields", methodName)
 		}
 
 		return revisionVerificationResult{
@@ -160,14 +160,34 @@ func getRevisionVerificationCompat(ctx context.Context, client any, shareID, vol
 		}, true, nil
 	}
 
+	var compatErr error
+
 	byVolumeRes, called, err := tryCall("GetRevisionVerificationByVolume", ctx, volumeID, linkID, revisionID)
 	if called {
-		return byVolumeRes, err
+		if err == nil {
+			return byVolumeRes, nil
+		}
+		if !isMethodCompatibilityError(err) {
+			return byVolumeRes, err
+		}
+		compatErr = err
 	}
 
 	byShareRes, called, err := tryCall("GetRevisionVerification", ctx, shareID, linkID, revisionID)
 	if called {
-		return byShareRes, err
+		if err == nil {
+			return byShareRes, nil
+		}
+		if !isMethodCompatibilityError(err) {
+			return byShareRes, err
+		}
+		if compatErr == nil {
+			compatErr = err
+		}
+	}
+
+	if compatErr != nil {
+		return revisionVerificationResult{}, compatErr
 	}
 
 	return revisionVerificationResult{}, nil

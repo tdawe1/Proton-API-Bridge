@@ -40,6 +40,19 @@ func (c *revisionVerificationInvalidSignatureClient) GetRevisionVerificationByVo
 	return fakeRevisionVerification{}, nil
 }
 
+type revisionVerificationInvalidVolumeFallbackClient struct {
+	calledByShare bool
+}
+
+func (c *revisionVerificationInvalidVolumeFallbackClient) GetRevisionVerificationByVolume(context.Context, string) (fakeRevisionVerification, error) {
+	return fakeRevisionVerification{}, nil
+}
+
+func (c *revisionVerificationInvalidVolumeFallbackClient) GetRevisionVerification(context.Context, string, string, string) (fakeRevisionVerification, error) {
+	c.calledByShare = true
+	return fakeRevisionVerification{VerificationCode: "share", ContentKeyPacket: "pkt"}, nil
+}
+
 type revisionVerificationPanicClient struct{}
 
 func (c *revisionVerificationPanicClient) GetRevisionVerificationByVolume(context.Context, string, string, string) (fakeRevisionVerification, error) {
@@ -198,6 +211,21 @@ func TestGetRevisionVerificationCompatPrefersVolumeRoute(t *testing.T) {
 
 func TestGetRevisionVerificationCompatFallsBackToShareRoute(t *testing.T) {
 	client := &revisionVerificationByShareOnlyClient{}
+
+	res, err := getRevisionVerificationCompat(context.Background(), client, "share", "volume", "link", "revision")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if !client.calledByShare {
+		t.Fatalf("expected share route fallback to be used")
+	}
+	if res.VerificationCode != "share" {
+		t.Fatalf("unexpected verification code: %q", res.VerificationCode)
+	}
+}
+
+func TestGetRevisionVerificationCompatFallsBackWhenVolumeRouteSignatureIsIncompatible(t *testing.T) {
+	client := &revisionVerificationInvalidVolumeFallbackClient{}
 
 	res, err := getRevisionVerificationCompat(context.Background(), client, "share", "volume", "link", "revision")
 	if err != nil {

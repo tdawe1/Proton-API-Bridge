@@ -31,6 +31,19 @@ func (c *moveLinkInvalidSignatureClient) MoveLinkByVolume(context.Context, strin
 	return nil
 }
 
+type moveLinkInvalidVolumeFallbackClient struct {
+	calledByShare bool
+}
+
+func (c *moveLinkInvalidVolumeFallbackClient) MoveLinkByVolume(context.Context, string) error {
+	return nil
+}
+
+func (c *moveLinkInvalidVolumeFallbackClient) MoveLink(context.Context, string, string, proton.MoveLinkReq) error {
+	c.calledByShare = true
+	return nil
+}
+
 type moveLinkPanicClient struct{}
 
 func (c *moveLinkPanicClient) MoveLinkByVolume(context.Context, string, string, proton.MoveLinkReq) error {
@@ -56,6 +69,17 @@ func TestMoveLinkCompatFallsBackToShareRoute(t *testing.T) {
 	}
 	if !client.calledByShare {
 		t.Fatalf("expected MoveLink to be called")
+	}
+}
+
+func TestMoveLinkCompatFallsBackWhenVolumeRouteSignatureIsIncompatible(t *testing.T) {
+	client := &moveLinkInvalidVolumeFallbackClient{}
+	err := moveLinkCompat(context.Background(), client, "share", "volume", "link", proton.MoveLinkReq{})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if !client.calledByShare {
+		t.Fatalf("expected MoveLink fallback to be called")
 	}
 }
 
